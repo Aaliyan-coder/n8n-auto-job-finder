@@ -1,0 +1,527 @@
+{
+  "name": "job-finder-daily",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "name": "Every day 9 AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -160,
+        64
+      ],
+      "id": "49a001b3-ab7a-4eee-8f71-49258ddd1470"
+    },
+    {
+      "parameters": {
+        "url": "https://remotive.com/api/remote-jobs?search=python&limit=50",
+        "options": {}
+      },
+      "name": "Remotive Jobs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        64,
+        -128
+      ],
+      "id": "561aec28-b25a-4ea1-b10a-329af7f83e63"
+    },
+    {
+      "parameters": {
+        "url": "https://www.arbeitnow.com/api/job-board-api",
+        "options": {}
+      },
+      "name": "Arbeitnow Jobs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        64,
+        256
+      ],
+      "id": "7038ea9f-c41b-412f-be11-cacc962696c0"
+    },
+    {
+      "parameters": {
+        "numberInputs": 3
+      },
+      "name": "Merge Sources",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        288,
+        48
+      ],
+      "id": "23644d12-bb60-415f-a93c-ab25c3551b3d"
+    },
+    {
+      "parameters": {
+        "jsCode": "const keywords = ['python', 'react', 'ai', 'ml', 'machine learning', 'fastapi', 'django', 'full stack', 'llm', 'data'];\nlet jobs = [];\n\nfor (const item of $input.all()) {\n  // Remotive: { jobs: [...] }\n  if (Array.isArray(item.json.jobs)) {\n    for (const j of item.json.jobs) {\n      jobs.push({\n        job_title: j.title ?? '',\n        company: j.company_name ?? '',\n        job_description: (j.description ?? '').replace(/<[^>]*>/g, ' ').slice(0, 2500),\n        apply_url: j.url ?? '',\n      });\n    }\n  }\n  // JSearch v2: { data: { jobs: [...] } }\n  if (item.json.data && Array.isArray(item.json.data.jobs)) {\n    for (const j of item.json.data.jobs) {\n      jobs.push({\n        job_title: j.job_title ?? '',\n        company: j.employer_name ?? '',\n        job_description: (j.job_description ?? '').replace(/<[^>]*>/g, ' ').slice(0, 2500),\n        apply_url: j.job_apply_link ?? '',\n      });\n    }\n  }\n  // Arbeitnow: { data: [...] }\n  if (Array.isArray(item.json.data)) {\n    for (const j of item.json.data) {\n      jobs.push({\n        job_title: j.title ?? '',\n        company: j.company_name ?? '',\n        job_description: (j.description ?? '').replace(/<[^>]*>/g, ' ').slice(0, 2500),\n        apply_url: j.url ?? '',\n      });\n    }\n  }\n}\n\nconst scored = jobs.map(j => {\n  const text = (j.job_title + ' ' + j.job_description).toLowerCase();\n  const hits = keywords.filter(k => text.includes(k)).length;\n  return { ...j, keyword_hits: hits };\n})\n.filter(j => j.keyword_hits >= 2)\n.sort((a, b) => b.keyword_hits - a.keyword_hits);\n\nconst seen = new Set();\nconst unique = [];\nfor (const j of scored) {\n  const key = j.job_title + '|' + j.company;\n  if (!seen.has(key)) { seen.add(key); unique.push(j); }\n}\n\nreturn unique.slice(0, 10).map(j => {\n  const m = j.job_description.match(/[\\w.+-]+@[\\w-]+\\.[\\w.]+/);\n  return { json: { ...j, contact_email: m ? m[0] : '' } };\n});"
+      },
+      "name": "Find & Score Jobs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        512,
+        64
+      ],
+      "id": "10c44f61-aeb8-49b4-a312-8cda4a115788"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=/no_think Write a short, honest application email from the candidate (resume in system message) for this job. 2 paragraphs max. Mention 2-3 genuinely matching skills. Do not invent experience.\n\nJOB: {{ $json.job_title }} at {{ $json.company }}\n{{ $json.job_description }}\n\nRespond with ONLY a valid JSON object, no markdown, no code fences:\n{\"email_subject\": \"<string>\", \"email_body\": \"<string>\"}",
+        "messages": {
+          "messageValues": [
+            {
+              "message": "You are a career assistant writing job applications for this candidate. Resume:\n\nMUHAMMAD AALIYAN ARIF — AI/ML Engineer (Lahore, Pakistan)\nEducation: BS Artificial Intelligence, UMT (2021–2025), CGPA 3.5.\nExperience: AI Intern at OptimusFox (intelligent agents); Junior Full Stack Developer at Big Binary Tech (React + Django features); Frontend Intern at Code Alpha (4 React+Tailwind apps, 12+ shared UI components); ML Teaching Assistant at UMT.\nSkills: Python, JavaScript, TypeScript, SQL; TensorFlow, PyTorch, Scikit-learn, XGBoost; YOLOv8, OpenCV, spaCy, LangChain, RAG, LLM APIs; React, Next.js, Tailwind; FastAPI, Django, DRF, Flask, Express.js, REST APIs, JWT; Neo4j, SQLite, PostgreSQL, Qdrant, Redis; Git, Vercel, Pytest.\nProjects: Worker Safety Monitor (YOLOv8 CV system); VERIDEX (agentic RAG platform); VisuaPrompt (AutoML platform, 37 REST endpoints); Knowledge-Based Conversational AI.\nNote: No MongoDB experience. Node.js only via Express basics. Strongest in Python backends, React frontends, AI/LLM work.\n\nBe honest about gaps — never invent experience the candidate does not have."
+            }
+          ]
+        }
+      },
+      "name": "Write Application Email",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.5,
+      "position": [
+        736,
+        64
+      ],
+      "id": "20652b41-1245-4820-b399-45958e7074a0"
+    },
+    {
+      "parameters": {
+        "model": "qwen3:1.7b",
+        "options": {}
+      },
+      "name": "Ollama qwen3",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [
+        672,
+        320
+      ],
+      "id": "242882ef-43d9-4398-b5d9-129141725209",
+      "credentials": {
+        "ollamaApi": {
+          "id": "Kt3LxZiP0Rrie85P",
+          "name": "Ollama account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const raw = $json.text ?? '';\nlet cleaned = raw\n  .replace(/<think>[\\s\\S]*?<\\/think>/g, '')\n  .replace(/```json/gi, '')\n  .replace(/```/g, '')\n  .trim();\n\nconst job = $('Find & Score Jobs').item.json;\nlet subject = '';\nlet body = '';\n\nconst start = cleaned.indexOf('{');\nconst end = cleaned.lastIndexOf('}');\nif (start !== -1 && end !== -1) {\n  try {\n    const parsed = JSON.parse(cleaned.slice(start, end + 1));\n    subject = parsed.email_subject ?? '';\n    body = parsed.email_body ?? '';\n  } catch (e) { /* fall through to fallback */ }\n}\n\nif (!subject) subject = 'Application: ' + job.job_title + ' at ' + job.company;\nif (!body) body = cleaned;\n\nbody = 'Apply here: ' + (job.apply_url || 'n/a') + '\\n\\n' + body;\n\nreturn { json: {\n  email_subject: subject,\n  email_body: body,\n  job_title: job.job_title,\n  company: job.company,\n  apply_url: job.apply_url,\n  contact_email: job.contact_email ?? '',\n  keyword_hits: job.keyword_hits\n} };"
+      },
+      "name": "Parse Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1088,
+        64
+      ],
+      "id": "e5115f1e-cb92-4460-929d-744967574e01"
+    },
+    {
+      "parameters": {
+        "fileSelector": "/files/Aaliyan_Resume.pdf",
+        "options": {}
+      },
+      "name": "Attach Resume",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        1536,
+        -32
+      ],
+      "id": "379ddc5c-466c-44df-b73c-9f8c75cca9a4"
+    },
+    {
+      "parameters": {
+        "resource": "draft",
+        "subject": "={{ $('Parse Email').item.json.email_subject }}",
+        "message": "={{ $('Parse Email').item.json.email_body }}",
+        "options": {
+          "attachmentsUi": {
+            "attachmentsBinary": [
+              {
+                "property": "data"
+              }
+            ]
+          },
+          "sendTo": "   {{ $('Parse Email').item.json.contact_email }}"
+        }
+      },
+      "name": "Create Gmail Draft",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1760,
+        -32
+      ],
+      "id": "19107f59-e6d0-44f6-96f5-758687d17b2f",
+      "webhookId": "771a16a6-561c-4ca3-94c1-21e93bc7661f",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "eHYFYQ7s7wbkNK1g",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "f94e3bb0-81d4-4ea6-8bc0-f926ff2dac87",
+              "leftValue": "={{ $json.contact_email }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1312,
+        64
+      ],
+      "id": "ef517558-1413-42b8-9861-05d4ecd508cb",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "15BGQkFcD0KYQo_KZQkCQdjy-7vJj1F0gIlpc_si-Tdo",
+          "mode": "list",
+          "cachedResultName": "for job",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/15BGQkFcD0KYQo_KZQkCQdjy-7vJj1F0gIlpc_si-Tdo/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/15BGQkFcD0KYQo_KZQkCQdjy-7vJj1F0gIlpc_si-Tdo/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "date": "={{ $now.toISO() }}",
+            "company": "={{ $json.company }}",
+            "job_title": "={{ $json.job_title }}",
+            "status": "to_apply",
+            "contact_email": "={{ $json.apply_url }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "date",
+              "displayName": "date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "company",
+              "displayName": "company",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "job_title",
+              "displayName": "job_title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "match_score",
+              "displayName": "match_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "missing_skills",
+              "displayName": "missing_skills",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "contact_email",
+              "displayName": "contact_email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1712,
+        208
+      ],
+      "id": "9ef9ffc3-87b7-401c-8f1b-3b82cd65c740",
+      "name": "Append row in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "XoCINiva13rFA8kq",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://jsearch.p.rapidapi.com/search-v2",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "python react AI developer jobs in Lahore, Pakistan"
+            },
+            {
+              "name": "num_pages",
+              "value": "1"
+            },
+            {
+              "name": "date_posted",
+              "value": "week"
+            },
+            {
+              "name": "country",
+              "value": "pk"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-RapidAPI-Key",
+              "value": ""
+            },
+            {
+              "name": "X-RapidAPI-Host",
+              "value": "jsearch.p.rapidapi.com"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        64,
+        64
+      ],
+      "id": "e2cec8f9-14e3-44e4-9d19-6caf2d27a1d7",
+      "name": "HTTP Request"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Every day 9 AM": {
+      "main": [
+        [
+          {
+            "node": "Remotive Jobs",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Arbeitnow Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remotive Jobs": {
+      "main": [
+        [
+          {
+            "node": "Merge Sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Arbeitnow Jobs": {
+      "main": [
+        [
+          {
+            "node": "Merge Sources",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Sources": {
+      "main": [
+        [
+          {
+            "node": "Find & Score Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find & Score Jobs": {
+      "main": [
+        [
+          {
+            "node": "Write Application Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Application Email": {
+      "main": [
+        [
+          {
+            "node": "Parse Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama qwen3": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Write Application Email",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Email": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach Resume": {
+      "main": [
+        [
+          {
+            "node": "Create Gmail Draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Attach Resume",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Append row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Merge Sources",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "8c5fb52c-f9c1-4b35-bc3f-b0d34edd5d2e",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "261aecc82d79b48694ebf62797f43ce658f65ae7e3be9c11a6d601e05273af14"
+  },
+  "nodeGroups": [],
+  "id": "xMSK9luyRP4heTON",
+  "tags": []
+}
